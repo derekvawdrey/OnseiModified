@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import MeCab
 import jaconv
@@ -41,7 +41,8 @@ def parse_words(sentence: str) -> List['Word']:
 
             ruby = parse_node(node)
 
-        word = Word(raw, ruby, phonetics)
+        julius = tuple(phonetics_to_julius_phonemes(phonetics)) if phonetics else None
+        word = Word(raw, ruby, phonetics, julius)
         words.append(word)
 
         node = node.next
@@ -50,8 +51,12 @@ def parse_words(sentence: str) -> List['Word']:
 
 
 def generate_julius_transcript_from_words(words: List['Word']) -> str:
-    katakanas = ''.join(((word.phonetics if word.phonetics else '') for word in words))
-    return jaconv.hiragana2julius(jaconv.kata2hira(katakanas))
+    phoneme_tokens: List[str] = []
+    for word in words:
+        if not word.phonetics:
+            continue
+        phoneme_tokens.extend(phonetics_to_julius_phonemes(word.phonetics))
+    return ' '.join(phoneme_tokens)
 
 
 @dataclass
@@ -59,6 +64,7 @@ class Word:
     raw: str
     ruby: Optional[Text]
     phonetics: Optional[str]
+    julius_phonemes: Optional[Tuple[str, ...]] = None
 
     def to_html(self) -> str:
         if self.ruby:
@@ -84,3 +90,12 @@ def parsing_test():
 
 if __name__ == '__main__':
     parsing_test()
+
+
+def phonetics_to_julius_phonemes(phonetics: Optional[str]) -> List[str]:
+    if not phonetics:
+        return []
+    hiragana = jaconv.kata2hira(phonetics)
+    julius = jaconv.hiragana2julius(hiragana)
+    tokens = [token for token in julius.split(' ') if token]
+    return tokens

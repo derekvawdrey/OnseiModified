@@ -256,6 +256,154 @@ class SpeechRecord:
 
         return times, mel_frequencies, mel_db
 
+    def textgrid_content(
+        self,
+        tier_name: str = "phonemes",
+        include_word_tier: bool = True,
+        word_tier_name: str = "words",
+    ) -> str:
+        """
+        Generate a Praat TextGrid representation using the detected phoneme segments.
+        """
+        if not self.phonemes:
+            raise NoPhonemeSegmentationError(self)
+
+        xmin = self.begin_ts if self.begin_ts is not None else self.snd.xmin
+        xmax = self.end_ts if self.end_ts is not None else self.snd.xmax
+
+        def _fmt(value: float) -> str:
+            return f"{value:.12f}".rstrip("0").rstrip(".") if "." in f"{value:.12f}" else f"{value:.12f}"
+
+        tiers: List[Tuple[str, List[Tuple[float, float, str]]]] = []
+        phoneme_tier = self._fill_intervals(self.phonemes, xmin, xmax)
+        tiers.append((tier_name, phoneme_tier))
+
+        if include_word_tier and self.sentence:
+            word_intervals = self._word_intervals()
+            if word_intervals:
+                tiers.insert(0, (word_tier_name, self._fill_intervals(word_intervals, xmin, xmax)))
+
+        lines = [
+            'File type = "ooTextFile"',
+            'Object class = "TextGrid"',
+            "",
+            f"xmin = {_fmt(xmin)}",
+            f"xmax = {_fmt(xmax)}",
+            "tiers? <exists>",
+            f"size = {len(tiers)}",
+            "item []:",
+        ]
+
+        for tier_idx, (tier_name_value, tier_intervals) in enumerate(tiers, start=1):
+            lines.extend([
+                f"    item [{tier_idx}]:",
+                '        class = "IntervalTier"',
+                f'        name = "{tier_name_value}"',
+                f"        xmin = {_fmt(xmin)}",
+                f"        xmax = {_fmt(xmax)}",
+                f"        intervals: size = {len(tier_intervals)}",
+            ])
+
+            for idx, (start, end, label) in enumerate(tier_intervals, start=1):
+                escaped_label = label.replace('"', '""')
+                lines.extend([
+                    f"        intervals [{idx}]:",
+                    f"            xmin = {_fmt(start)}",
+                    f"            xmax = {_fmt(end)}",
+                    f'            text = "{escaped_label}"',
+                ])
+
+        return "\n".join(lines)
+
+    def save_textgrid(
+        self,
+        filepath: str,
+        tier_name: str = "phonemes",
+        include_word_tier: bool = True,
+        word_tier_name: str = "words",
+    ) -> None:
+        """
+        Write the phoneme segmentation to a Praat TextGrid file.
+        """
+        content = self.textgrid_content(
+            tier_name=tier_name,
+            include_word_tier=include_word_tier,
+            word_tier_name=word_tier_name,
+        )
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def _word_intervals(self) -> List[Tuple[float, float, str]]:
+        if not self.phonemes or not self.sentence:
+            return []
+
+        sequences = [
+            list(word.julius_phonemes) if word.julius_phonemes else []
+            for word in self.sentence.words
+        ]
+
+        phonemes = list(self.phonemes)
+        num_phonemes = len(phonemes)
+        idx = 0
+        word_intervals: List[Tuple[float, float, str]] = []
+        skip_labels = {"pau", "sil", "sp", ""}
+
+        for word, seq in zip(self.sentence.words, sequences):
+            normalized_seq = [p for p in seq if p not in skip_labels]
+            if not normalized_seq:
+                continue
+
+            # Advance to the next non-skip phoneme
+            while idx < num_phonemes and phonemes[idx][2] in skip_labels:
+                idx += 1
+            if idx >= num_phonemes:
+                return []
+
+            start = phonemes[idx][0]
+            matched = 0
+
+            while idx < num_phonemes and matched < len(normalized_seq):
+                label = phonemes[idx][2]
+                if label in skip_labels:
+                    idx += 1
+                    continue
+                if label != normalized_seq[matched]:
+                    return []
+                matched += 1
+                idx += 1
+
+            if matched < len(normalized_seq):
+                return []
+
+            end = phonemes[idx - 1][1]
+            word_intervals.append((start, end, word.raw))
+
+        return word_intervals
+
+    @staticmethod
+    def _fill_intervals(
+        base_intervals: List[Tuple[float, float, str]],
+        xmin: float,
+        xmax: float,
+        eps: float = 1e-9,
+    ) -> List[Tuple[float, float, str]]:
+        intervals: List[Tuple[float, float, str]] = []
+        cursor = xmin
+        for start, end, label in sorted(base_intervals, key=lambda x: x[0]):
+            start = max(start, xmin)
+            end = min(end, xmax)
+            if end - start <= eps:
+                continue
+            if start - cursor > eps:
+                intervals.append((cursor, start, ""))
+            elif cursor - start > eps:
+                start = cursor
+            intervals.append((start, end, label))
+            cursor = max(cursor, end)
+        if xmax - cursor > eps:
+            intervals.append((cursor, xmax, ""))
+        return intervals
+
 
 class AlignmentError(Exception):
     pass

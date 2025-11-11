@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 
 from onsei.pyplot import plot_aligned_pitches_and_phonemes, plot_pitch_and_phonemes, plot_pitch_and_spectro
 from onsei.speech_record import AlignmentError, AlignmentMethod, NoPhonemeSegmentationError, SpeechRecord
@@ -400,6 +400,52 @@ def post_graph_data(
         "sentence": sentence,
         "record": _serialize_record(rec, pitch_aggregation=pitch_aggregation),
     }
+
+
+@app.post("/graph/textgrid")
+def post_graph_textgrid(
+    sentence: str = Form(...),
+    tier_name: str = Form("phonemes"),
+    include_word_tier: bool = Form(True),
+    word_tier_name: str = Form("words"),
+    audio_file: UploadFile = File(...),
+):
+    _validate_extension(audio_file, "Audio file")
+
+    with TemporaryDirectory() as td:
+        audio_filepath = os.path.join(td, audio_file.filename)
+        _write_upload(audio_file, audio_filepath)
+
+        logging.debug(f"Converting {audio_filepath} to WAV 16KHz mono")
+
+        wav_filepath = os.path.join(td, "audio.wav")
+        convert_audio(audio_filepath, wav_filepath)
+
+        try:
+            rec = SpeechRecord(wav_filepath, sentence, name="Reference")
+            content = rec.textgrid_content(
+                tier_name=tier_name,
+                include_word_tier=include_word_tier,
+                word_tier_name=word_tier_name,
+            )
+        except NoPhonemeSegmentationError:
+            logging.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Could not segment the phonemes in the audio',
+            )
+        except Exception:
+            logging.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail='Something went wrong on the server, not your fault :(',
+            )
+
+    filename_root = os.path.splitext(audio_file.filename or "audio")[0]
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename_root}.TextGrid"',
+    }
+    return PlainTextResponse(content, media_type="text/plain", headers=headers)
 
 
 @app.get("/")
