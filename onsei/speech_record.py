@@ -6,7 +6,7 @@ import logging
 import os
 from enum import Enum, auto
 from functools import cached_property
-from typing import Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -158,6 +158,56 @@ class SpeechRecord:
         if np.isnan(mean_distance):
             mean_distance = None
         return mean_distance
+
+    def aggregate_pitch_by_phoneme(
+        self,
+        aggregator: Callable[[np.ndarray], float] = np.nanmean,
+        fill_value: Optional[float] = None,
+    ) -> List[Tuple[str, Optional[float]]]:
+        """
+        Aggregate the F0 (pitch) contour by phoneme segments.
+
+        Parameters
+        ----------
+        aggregator:
+            Function applied on the F0 samples that fall within the phoneme boundaries.
+            Defaults to np.nanmean but can be any function that accepts a 1-D numpy array.
+        fill_value:
+            Value used when no voiced F0 samples fall inside the phoneme interval.
+            Defaults to None.
+
+        Returns
+        -------
+        List of tuples with (phoneme_label, aggregated_f0).
+        """
+        if not self.phonemes:
+            return []
+
+        timestamps = self.pitch.xs()
+        phoneme_pitch: List[Tuple[str, Optional[float]]] = []
+
+        for start_ts, end_ts, label in self.phonemes:
+            start_idx = np.searchsorted(timestamps, start_ts, side="left")
+            end_idx = np.searchsorted(timestamps, end_ts, side="right")
+
+            segment = self.pitch_freq[start_idx:end_idx]
+            # Filter out NaNs to avoid warnings from aggregators that do not handle them
+            voiced_segment = segment[~np.isnan(segment)]
+
+            if voiced_segment.size == 0:
+                phoneme_pitch.append((label, fill_value))
+                continue
+
+            value = aggregator(voiced_segment)
+            if isinstance(value, np.ndarray):
+                value = value.item()
+
+            if isinstance(value, float) and np.isnan(value):
+                phoneme_pitch.append((label, fill_value))
+            else:
+                phoneme_pitch.append((label, float(value)))
+
+        return phoneme_pitch
 
 
 class AlignmentError(Exception):
