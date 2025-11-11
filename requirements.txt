@@ -9,4 +9,4 @@ git+https://github.com/itsupera/furigana.git#egg=furigana
 PySegmentKit==0.2.1
 typer==0.3.2
 webrtcvad==2.0.10
-librosa==0.10.1
+librosa
