@@ -12,17 +12,17 @@ RUN apt-get update && apt-get install -y \
 # (Adapted from https://github.com/torao/ml-nlp/blob/master/ml-nlp-corpus/docker)
 
 # MeCab 0.996
-RUN curl -o mecab-0.996.tar.gz -L 'https://drive.google.com/uc?export=download&id=0B4y35FiV1wh7cENtOXlicTFaRUE'
-RUN tar zxfv mecab-0.996.tar.gz
-RUN cd mecab-0.996; ./configure; make; make check; make install
+COPY required_libraries/mecab-0.996.tar.gz /tmp/mecab-0.996.tar.gz
+RUN cd /tmp && tar zxfv mecab-0.996.tar.gz
+RUN cd /tmp/mecab-0.996; ./configure; make; make check; make install
 RUN ldconfig
-RUN rm -rf mecab-0.996 mecab-0.996.tar.gz
+RUN rm -rf /tmp/mecab-0.996 /tmp/mecab-0.996.tar.gz
 
 # MeCab IPADIC
-RUN curl -o mecab-ipadic-2.7.0-20070801.tar.gz -L 'https://drive.google.com/uc?export=download&id=0B4y35FiV1wh7MWVlSDBCSXZMTXM'
-RUN tar zxf mecab-ipadic-2.7.0-20070801.tar.gz
-RUN cd mecab-ipadic-2.7.0-20070801 && ./configure --with-charset=utf8 && make && make install
-RUN rm -rf mecab-ipadic-2.7.0-20070801 mecab-ipadic-2.7.0-20070801.tar.gz
+COPY required_libraries/mecab-ipadic-2.7.0-20070801.tar.gz /tmp/mecab-ipadic-2.7.0-20070801.tar.gz
+RUN cd /tmp && tar zxf mecab-ipadic-2.7.0-20070801.tar.gz
+RUN cd /tmp/mecab-ipadic-2.7.0-20070801 && ./configure --with-charset=utf8 && make && make install
+RUN rm -rf /tmp/mecab-ipadic-2.7.0-20070801 /tmp/mecab-ipadic-2.7.0-20070801.tar.gz
 
 # NEologd
 RUN git clone --depth 1 https://github.com/neologd/mecab-ipadic-neologd.git
