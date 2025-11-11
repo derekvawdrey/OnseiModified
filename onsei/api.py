@@ -8,22 +8,36 @@ import math
 import os
 import shutil
 import traceback
+from enum import Enum
 from io import BytesIO
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Optional
-import matplotlib.pyplot as plt
+from typing import Callable, Dict, List, Optional
 
-from fastapi import FastAPI, File, UploadFile, Form, status, HTTPException
+import matplotlib.pyplot as plt
+import numpy as np
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from onsei.pyplot import plot_aligned_pitches_and_phonemes, plot_pitch_and_spectro, plot_pitch_and_phonemes
-from onsei.speech_record import SpeechRecord, AlignmentError, NoPhonemeSegmentationError, AlignmentMethod
+from onsei.pyplot import plot_aligned_pitches_and_phonemes, plot_pitch_and_phonemes, plot_pitch_and_spectro
+from onsei.speech_record import AlignmentError, AlignmentMethod, NoPhonemeSegmentationError, SpeechRecord
 from onsei.utils import convert_audio
 
 app = FastAPI()
 
 
 SUPPORTED_FILE_EXTENSIONS = {"wav", "mp3", "ogg"}
+
+
+class PitchAggregation(str, Enum):
+    mean = "mean"
+    median = "median"
+
+
+PITCH_AGGREGATION_FUNCTIONS: Dict[PitchAggregation, Callable[[np.ndarray], float]] = {
+    PitchAggregation.mean: np.nanmean,
+    PitchAggregation.median: np.nanmedian,
+}
 
 
 def _validate_extension(upload: UploadFile, label: str) -> None:
@@ -90,8 +104,11 @@ def _serialize_phonemes(phonemes):
     ]
 
 
-def _serialize_record(rec: SpeechRecord) -> Dict[str, object]:
-    return {
+def _serialize_record(
+    rec: SpeechRecord,
+    pitch_aggregation: Optional[PitchAggregation] = None,
+) -> Dict[str, object]:
+    data: Dict[str, object] = {
         "name": rec.name,
         "pitch": _serialize_curve(rec.pitch.xs(), rec.pitch_freq),
         "intensity": _serialize_curve(rec.intensity.xs(), rec.intensity.values[0]),
@@ -103,6 +120,20 @@ def _serialize_record(rec: SpeechRecord) -> Dict[str, object]:
             "end": _float_or_none(float(rec.end_ts)) if rec.end_ts is not None else None,
         },
     }
+
+    if pitch_aggregation:
+        aggregation_fn = PITCH_AGGREGATION_FUNCTIONS[pitch_aggregation]
+        aggregated = rec.aggregate_pitch_by_phoneme(aggregator=aggregation_fn)
+        data["phoneme_pitch_aggregation"] = pitch_aggregation.value
+        data["phoneme_pitch"] = [
+            {
+                "label": label,
+                "value": (_float_or_none(float(value)) if value is not None else None),
+            }
+            for label, value in aggregated
+        ]
+
+    return data
 
 
 def _compare_audio_uploads(
@@ -229,6 +260,7 @@ def post_compare_data(
     show_all_graphs: bool = Form(False),
     alignment_method: AlignmentMethod = Form(AlignmentMethod.phonemes),
     fallback_if_no_alignment: bool = Form(True),
+    pitch_aggregation: Optional[PitchAggregation] = Form(None),
     teacher_audio_file: UploadFile = File(...),
     student_audio_file: UploadFile = File(...),
 ):
@@ -267,13 +299,13 @@ def post_compare_data(
         response["graphs"].append(
             {
                 "type": "student_pitch",
-                "data": _serialize_record(student_rec),
+                "data": _serialize_record(student_rec, pitch_aggregation=pitch_aggregation),
             }
         )
         response["graphs"].append(
             {
                 "type": "reference_pitch",
-                "data": _serialize_record(teacher_rec),
+                "data": _serialize_record(teacher_rec, pitch_aggregation=pitch_aggregation),
             }
         )
 
@@ -322,6 +354,7 @@ def post_graph_png(
 @app.post("/graph/data")
 def post_graph_data(
     sentence: str = Form(...),
+    pitch_aggregation: Optional[PitchAggregation] = Form(None),
     audio_file: UploadFile = File(...),
 ):
     _validate_extension(audio_file, "Audio file")
@@ -352,7 +385,7 @@ def post_graph_data(
 
     return {
         "sentence": sentence,
-        "record": _serialize_record(rec),
+        "record": _serialize_record(rec, pitch_aggregation=pitch_aggregation),
     }
 
 
