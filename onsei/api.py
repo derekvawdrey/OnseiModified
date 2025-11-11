@@ -133,6 +133,19 @@ def _serialize_record(
             for label, value in aggregated
         ]
 
+    mel_times, mel_frequencies, mel_db = rec.mel_spectrogram()
+    data["mel_spectrogram"] = {
+        "times": [float(t) for t in mel_times],
+        "frequencies": [float(f) for f in mel_frequencies],
+        "values": [
+            [
+                _float_or_none(float(v)) if np.isfinite(v) else None
+                for v in row
+            ]
+            for row in mel_db
+        ],
+    }
+
     return data
 
 

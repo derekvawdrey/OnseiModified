@@ -8,6 +8,7 @@ from enum import Enum, auto
 from functools import cached_property
 from typing import Callable, List, Optional, Tuple, Union
 
+import librosa
 import numpy as np
 
 from onsei.sentence import Sentence
@@ -208,6 +209,52 @@ class SpeechRecord:
                 phoneme_pitch.append((label, float(value)))
 
         return phoneme_pitch
+
+    def mel_spectrogram(
+        self,
+        n_fft: int = 1024,
+        hop_length: int = 256,
+        n_mels: int = 80,
+        fmin: float = 0.0,
+        fmax: Optional[float] = None,
+        power: float = 2.0,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Compute a mel spectrogram (in dB) for the underlying audio signal.
+
+        Returns
+        -------
+        times:
+            1-D array with the center time of each frame (seconds).
+        mel_frequencies:
+            1-D array with the center frequency of each mel band (Hz).
+        mel_spectrogram_db:
+            2-D array of shape (n_mels, n_frames) with log-power values in dB.
+        """
+        samples = self.snd.values[0]
+        sr = int(self.snd.sampling_frequency)
+        if samples.size == 0:
+            return np.array([]), np.array([]), np.empty((0, 0))
+
+        if fmax is None:
+            fmax = sr / 2.0
+
+        mel = librosa.feature.melspectrogram(
+            y=samples,
+            sr=sr,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            fmin=fmin,
+            fmax=fmax,
+            power=power,
+            center=True,
+        )
+        mel_db = librosa.power_to_db(mel, ref=np.max)
+        times = librosa.frames_to_time(np.arange(mel.shape[1]), sr=sr, hop_length=hop_length)
+        mel_frequencies = librosa.mel_frequencies(n_mels=n_mels, fmin=fmin, fmax=fmax)
+
+        return times, mel_frequencies, mel_db
 
 
 class AlignmentError(Exception):
