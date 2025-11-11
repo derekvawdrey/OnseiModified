@@ -248,6 +248,7 @@ def post_compare_data(
     )
 
     response: Dict[str, object] = {
+        "sentence": sentence,
         "score": score,
         "mean_distance": _float_or_none(mean_distance) if mean_distance is not None else None,
         "alignment_method": alignment_method.value if alignment_method else None,
@@ -350,6 +351,7 @@ def post_graph_data(
             )
 
     return {
+        "sentence": sentence,
         "record": _serialize_record(rec),
     }
 
